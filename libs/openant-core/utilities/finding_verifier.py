@@ -39,6 +39,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from .llm_client import TokenTracker, get_global_tracker
+from .verify_trace import VerifyTrace, blocks_to_dicts, extract_reasoning
 from .llm import (
     LLMRateLimitError,
     Message,
@@ -432,7 +433,33 @@ class FindingVerifier:
         finding: str,
         attack_vector: str,
         reasoning: str,
-        files_included: list = None
+        files_included: list = None,
+        trace_id: Optional[str] = None,
+    ) -> VerificationResult:
+        """Validate a Stage 1 assessment (see _verify_result_impl).
+
+        When OPENANT_TRACE_DIR is set and trace_id is given, the full agent
+        conversation is written to <dir>/<trace_id>.jsonl.
+        """
+        trace = VerifyTrace(trace_id)
+        try:
+            result = self._verify_result_impl(
+                code, finding, attack_vector, reasoning, files_included, trace
+            )
+        except BaseException as exc:
+            trace.emit("error", error_type=type(exc).__name__, error=str(exc))
+            raise
+        trace.emit("end", result=result.to_dict())
+        return result
+
+    def _verify_result_impl(
+        self,
+        code: str,
+        finding: str,
+        attack_vector: str,
+        reasoning: str,
+        files_included: list,
+        trace: VerifyTrace,
     ) -> VerificationResult:
         """
         Validate a Stage 1 assessment with exploit path tracing.
@@ -465,6 +492,17 @@ class FindingVerifier:
 
         # Get system prompt with app context if available
         system_prompt = get_verification_system_prompt(self.app_context)
+
+        trace.emit(
+            "start",
+            model=self.binding.model,
+            max_iterations=MAX_ITERATIONS,
+            max_tokens=MAX_TOKENS_PER_RESPONSE,
+            tools=[getattr(t, "name", str(t)) for t in self._tool_defs],
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            stage1_finding=finding,
+        )
 
         messages: list[Message] = [
             Message(role="user", content=[TextBlock(user_prompt)])
@@ -536,6 +574,16 @@ class FindingVerifier:
             assistant_content = response.content
             stop_reason = response.stop_reason
 
+            trace.emit(
+                "turn",
+                iteration=iterations,
+                stop_reason=stop_reason,
+                input_tokens=response.input_tokens,
+                output_tokens=response.output_tokens,
+                blocks=blocks_to_dicts(assistant_content),
+                reasoning=extract_reasoning(getattr(response, "raw", None)),
+            )
+
             # If model finished without calling finish tool, try to parse response
             if stop_reason == "end_turn":
                 result = self._try_parse_text_response(
@@ -590,6 +638,8 @@ class FindingVerifier:
 
                     if tool_name == "finish":
                         finish_result = tool_input
+                        trace.emit("tool_result", iteration=iterations, tool_use_id=tool_use_id,
+                                   name=tool_name, content='{"status": "complete"}')
                         tool_results.append(
                             ToolResultBlock(
                                 tool_use_id=tool_use_id,
@@ -600,6 +650,9 @@ class FindingVerifier:
                         break
                     else:
                         outcome = self.tool_executor.execute(tool_name, tool_input)
+                        capped = cap_tool_result_content(outcome)
+                        trace.emit("tool_result", iteration=iterations, tool_use_id=tool_use_id,
+                                   name=tool_name, content=capped)
                         tool_results.append(
                             ToolResultBlock(
                                 tool_use_id=tool_use_id,
@@ -609,7 +662,7 @@ class FindingVerifier:
                                 # (PR #133) with the same 24k limit; raw
                                 # appends grew verify's input without bound
                                 # across the 20 iterations.
-                                content=cap_tool_result_content(outcome),
+                                content=capped,
                             )
                         )
 
@@ -929,7 +982,8 @@ class FindingVerifier:
                 finding=stage1_finding,
                 attack_vector=result.get("attack_vector"),
                 reasoning=result.get("reasoning", ""),
-                files_included=result.get("files_included", [])
+                files_included=result.get("files_included", []),
+                trace_id=result.get("unit_id") or route_key,
             )
 
             result["verification"] = verification.to_dict()

@@ -580,7 +580,8 @@ def run_experiment(
                         finding=stage1_finding,
                         attack_vector=result.get("attack_vector"),
                         reasoning=result.get("reasoning", ""),
-                        files_included=result.get("files_included", [])
+                        files_included=result.get("files_included", []),
+                        trace_id=result.get("unit_id") or route_key,
                     )
 
                     # Update result with verification
