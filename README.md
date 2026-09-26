@@ -34,6 +34,7 @@ To submit your repo for scanning:
 - Zig (beta)
 - Swift (beta)
 - Rust (beta)
+- Java (beta)
 
 ## Credits
 

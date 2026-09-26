@@ -37,7 +37,8 @@
     ".php": "php",
     ".zig": "zig",
     ".swift": "swift",
-    ".rs": "rust"
+    ".rs": "rust",
+    ".java": "java"
   },
   "languages": {
     "python": {
@@ -112,6 +113,13 @@
       "extensions": [".rs"],
       "parser": {"mode": "subprocess", "script": "parsers/rust/test_pipeline.py"},
       "fence": "rust",
+      "docker_template": null,
+      "enabled": true
+    },
+    "java": {
+      "extensions": [".java"],
+      "parser": {"mode": "subprocess", "script": "parsers/java/test_pipeline.py"},
+      "fence": "java",
       "docker_template": null,
       "enabled": true
     }

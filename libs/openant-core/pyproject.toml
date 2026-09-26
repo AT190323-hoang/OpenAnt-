@@ -31,6 +31,7 @@ dependencies = [
     "tree-sitter-zig>=1.1.2",
     "tree-sitter-swift>=0.7.3",
     "tree-sitter-rust>=0.21.0",
+    "tree-sitter-java>=0.21.0",
 ]
 
 [project.optional-dependencies]
